@@ -1,0 +1,27 @@
+{
+  "name": "plural-moderation",
+  "version": "1.0.0",
+  "description": "Plural Moderation - A self-hosted Discord moderation bot with reaction roles, ban, kick, and timeout features",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "dev": "nodemon bot.js"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "moderation",
+    "reaction-roles"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "discord.js": "^14.14.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
