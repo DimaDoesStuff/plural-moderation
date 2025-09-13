@@ -1,4 +1,4 @@
-# Discord Moderation Bot
+# Plural Moderation Bot
 
 A powerful, self-hosted Discord moderation bot with reaction roles, ban, kick, and timeout features. Built with Discord.js v14 and designed for easy deployment through GitHub.
 
@@ -209,5 +209,6 @@ If you encounter issues or have questions:
 3. Create an issue on GitHub
 
 ---
+
 
 **Note**: This bot is designed to be lightweight and efficient while providing essential moderation features. It's perfect for small to medium-sized Discord servers that need reliable moderation tools without the complexity of larger bots.
