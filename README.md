@@ -42,10 +42,10 @@ A powerful, self-hosted Discord moderation bot with reaction roles, ban, kick, a
    ```
 
 3. **Configure environment variables**
-   ```bash
-   cp .env.example .env
+
+   # Rename "rename to .env.txt" to .env
    # Edit .env and add your Discord bot token
-   ```
+   
 
 4. **Start the bot**
    ```bash
@@ -209,5 +209,6 @@ If you encounter issues or have questions:
 3. Create an issue on GitHub
 
 ---
+
 
 **Note**: This bot is designed to be lightweight and efficient while providing essential moderation features. It's perfect for small to medium-sized Discord servers that need reliable moderation tools without the complexity of larger bots.
