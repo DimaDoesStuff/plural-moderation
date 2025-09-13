@@ -2,6 +2,9 @@ const { Client, GatewayIntentBits, PermissionFlagsBits, EmbedBuilder, ActionRowB
 const fs = require('fs').promises;
 const path = require('path');
 
+// Load environment variables
+require('dotenv').config();
+
 class ModerationBot {
     constructor() {
         this.client = new Client({
@@ -59,7 +62,15 @@ class ModerationBot {
             }
         });
 
-        // Reaction role handlers
+        this.client.on('guildCreate', () => {
+            console.log('Joined a new server!');
+            this.setStatus();
+        });
+
+        this.client.on('guildDelete', () => {
+            console.log('Left a server.');
+            this.setStatus();
+        });
         this.client.on('messageReactionAdd', async (reaction, user) => {
             if (user.bot) return;
             await this.handleReactionRole(reaction, user, 'add');
@@ -509,10 +520,6 @@ class ModerationBot {
     }
 
     async start(token) {
-        this.client.once('ready', async () => {
-            await this.registerCommands();
-        });
-
         await this.client.login(token);
     }
 }
