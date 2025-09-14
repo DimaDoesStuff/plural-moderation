@@ -28,6 +28,7 @@ class ModerationBot {
             const data = await fs.readFile(this.dataFile, 'utf8');
             const parsed = JSON.parse(data);
             this.reactionRoles = new Map(parsed.reactionRoles || []);
+            console.log(`Loaded ${this.reactionRoles.size} reaction roles from data file`);
         } catch (error) {
             console.log('No existing data file found, starting fresh');
         }
@@ -41,8 +42,15 @@ class ModerationBot {
     }
 
     setupEventHandlers() {
-        this.client.once('ready', () => {
+        this.client.once('ready', async () => {
             console.log(`Bot is ready! Logged in as ${this.client.user.tag}`);
+            this.setStatus();
+            
+            // Register commands when bot is ready
+            await this.registerCommands();
+            
+            // IMPORTANT: Restore reaction listeners after bot is ready
+            await this.restoreReactionListeners();
         });
 
         // Slash commands handler
@@ -71,6 +79,7 @@ class ModerationBot {
             console.log('Left a server.');
             this.setStatus();
         });
+        
         this.client.on('messageReactionAdd', async (reaction, user) => {
             if (user.bot) return;
             await this.handleReactionRole(reaction, user, 'add');
@@ -82,11 +91,89 @@ class ModerationBot {
         });
     }
 
+    async restoreReactionListeners() {
+        console.log('Restoring reaction role listeners...');
+        let restoredCount = 0;
+        const failedReactions = [];
+
+        for (const [key, reactionRole] of this.reactionRoles.entries()) {
+            try {
+                const guild = this.client.guilds.cache.get(reactionRole.guildId);
+                if (!guild) {
+                    console.log(`Guild ${reactionRole.guildId} not found, removing reaction role`);
+                    this.reactionRoles.delete(key);
+                    continue;
+                }
+
+                const channel = guild.channels.cache.get(reactionRole.channelId);
+                if (!channel || !channel.isTextBased()) {
+                    console.log(`Channel ${reactionRole.channelId} not found or not text-based, removing reaction role`);
+                    this.reactionRoles.delete(key);
+                    continue;
+                }
+
+                const message = await channel.messages.fetch(reactionRole.messageId).catch(() => null);
+                if (!message) {
+                    console.log(`Message ${reactionRole.messageId} not found, removing reaction role`);
+                    this.reactionRoles.delete(key);
+                    continue;
+                }
+
+                const role = guild.roles.cache.get(reactionRole.roleId);
+                if (!role) {
+                    console.log(`Role ${reactionRole.roleId} not found, removing reaction role`);
+                    this.reactionRoles.delete(key);
+                    continue;
+                }
+
+                // Try to add the reaction if it's not already there
+                let emojiToUse = reactionRole.emoji;
+                const customEmojiMatch = reactionRole.emoji.match(/<:(.*?):(\d+)>/);
+                if (customEmojiMatch) {
+                    emojiToUse = customEmojiMatch[2]; // Use emoji ID for custom emojis
+                }
+
+                // Check if the bot's reaction is already on the message
+                const existingReaction = message.reactions.cache.find(r => {
+                    if (customEmojiMatch) {
+                        return r.emoji.id === emojiToUse;
+                    } else {
+                        return r.emoji.name === emojiToUse;
+                    }
+                });
+
+                if (!existingReaction || !existingReaction.me) {
+                    await message.react(emojiToUse);
+                }
+
+                restoredCount++;
+                console.log(`✅ Restored reaction role: ${reactionRole.emoji} -> ${role.name} in ${guild.name}`);
+            } catch (error) {
+                console.error(`Failed to restore reaction role ${key}:`, error.message);
+                failedReactions.push(key);
+            }
+        }
+
+        // Remove failed reaction roles
+        for (const key of failedReactions) {
+            this.reactionRoles.delete(key);
+        }
+
+        if (failedReactions.length > 0) {
+            await this.saveData();
+        }
+
+        console.log(`✅ Restored ${restoredCount} reaction role listeners`);
+        if (failedReactions.length > 0) {
+            console.log(`❌ Removed ${failedReactions.length} invalid reaction roles`);
+        }
+    }
+
     async handleSlashCommand(interaction) {
         const { commandName, options } = interaction;
 
         // Check permissions for moderation commands
-        const moderationCommands = ['ban', 'kick', 'timeout', 'reactionrole'];
+        const moderationCommands = ['ban', 'kick', 'timeout', 'reactionrole', 'debug'];
         if (moderationCommands.includes(commandName) && 
             !interaction.member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
             return interaction.reply({ 
@@ -110,6 +197,9 @@ class ModerationBot {
                 break;
             case 'help':
                 await this.handleHelp(interaction);
+                break;
+            case 'debug':
+                await this.handleDebug(interaction);
                 break;
         }
     }
@@ -315,11 +405,25 @@ class ModerationBot {
             }
         }
 
-        const key = `${reaction.message.id}-${reaction.emoji.name || reaction.emoji.id}`;
+        // Create key using emoji name for unicode emojis or ID for custom emojis
+        const emojiIdentifier = reaction.emoji.id || reaction.emoji.name;
+        const key = `${reaction.message.id}-${emojiIdentifier}`;
         const reactionRole = this.reactionRoles.get(key);
         
-        if (!reactionRole) return;
+        if (!reactionRole) {
+            // Also try with the raw emoji format stored in the database
+            const altKey = `${reaction.message.id}-${reaction.emoji.toString()}`;
+            const altReactionRole = this.reactionRoles.get(altKey);
+            if (!altReactionRole) return;
+            
+            // Use the alternative reaction role if found
+            return this.processReactionRole(altReactionRole, reaction, user, action, altKey);
+        }
 
+        return this.processReactionRole(reactionRole, reaction, user, action, key);
+    }
+
+    async processReactionRole(reactionRole, reaction, user, action, key) {
         try {
             const guild = this.client.guilds.cache.get(reactionRole.guildId);
             if (!guild) return;
@@ -364,7 +468,7 @@ class ModerationBot {
                 },
                 { 
                     name: '❓ Other', 
-                    value: '`/help` - Show this help message', 
+                    value: '`/help` - Show this help message\n`/debug` - Show debug information', 
                     inline: false 
                 }
             )
@@ -372,6 +476,39 @@ class ModerationBot {
             .setTimestamp();
 
         await interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    async handleDebug(interaction) {
+        const debugInfo = {
+            totalReactionRoles: this.reactionRoles.size,
+            guildReactionRoles: Array.from(this.reactionRoles.values()).filter(rr => rr.guildId === interaction.guild.id),
+            allKeys: Array.from(this.reactionRoles.keys())
+        };
+
+        const embed = new EmbedBuilder()
+            .setColor('#ff9900')
+            .setTitle('🛠 Debug Information')
+            .addFields(
+                { name: 'Total Reaction Roles', value: debugInfo.totalReactionRoles.toString(), inline: true },
+                { name: 'In This Server', value: debugInfo.guildReactionRoles.length.toString(), inline: true },
+                { name: 'All Keys', value: debugInfo.allKeys.length > 0 ? debugInfo.allKeys.slice(0, 10).join('\n') : 'None', inline: false }
+            )
+            .setTimestamp();
+
+        await interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    setStatus() {
+        const serverCount = this.client.guilds.cache.size;
+        const statusText = `Helping Plural Systems In ${serverCount} Server${serverCount !== 1 ? 's' : ''}`;
+        
+        this.client.user.setPresence({
+            activities: [{
+                name: statusText,
+                type: 0 // PLAYING type
+            }],
+            status: 'online'
+        });
     }
 
     async registerCommands() {
@@ -507,6 +644,10 @@ class ModerationBot {
             {
                 name: 'help',
                 description: 'Show help information'
+            },
+            {
+                name: 'debug',
+                description: 'Show debug information for reaction roles'
             }
         ];
 
